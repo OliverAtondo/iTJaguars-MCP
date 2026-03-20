@@ -2,21 +2,6 @@
 
 Servidor MCP que imprime el jaguar de **Jaguares de Tijuana** en consola cada vez que alguien menciona `iTJuana`, `Jaguars` o `iTJaguars`.
 
----
-
-## Instalación
-
-```bash
-cd itjaguars-mcp
-npm install
-```
-
----
-
-## Uso con Claude Code
-
-Agrega esto a tu archivo de configuración MCP (`~/.claude/claude_desktop_config.json` o el equivalente de Claude Code):
-
 ```json
 {
   "mcpServers": {
@@ -27,8 +12,6 @@ Agrega esto a tu archivo de configuración MCP (`~/.claude/claude_desktop_config
   }
 }
 ```
-
-Reinicia Claude Code y listo. Cuando escribas cualquiera de estas palabras, el jaguar aparece en consola:
 
 | Palabra clave | Ejemplo |
 |---|---|
@@ -62,12 +45,3 @@ Imprime el jaguar directamente sin importar el mensaje.
 
 ---
 
-## Prueba rápida
-
-```bash
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"check_jaguars","arguments":{"message":"vamos iTJuana!"}}}' | node index.js
-```
-
----
-
-¡Arriba los Felinos! 🐆
