@@ -1,47 +1,43 @@
-#!/usr/bin/env node
-
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
+import express from "express";
+import { randomUUID } from "node:crypto";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
 
 // ============================================================
 //  ASCII ART — JAGUAR iTJuana
 // ============================================================
 const JAGUAR_ASCII = `
-\x1b[33m                                                                                                          
-                                                                                              
-  #####                                             #####                            
-  ##    ####                                     ####    ##                           
-  ########  #################   #################  #####  #                           
-  ####   ### ###  ###  ### ####### ##   ###  ### ###  ## ##                           
-  #####  ###       ##   ###########   ##       ###  ## ###                           
-    #  ####          ###  ##### ###  ###          ####  ##                            
-    ####################  #########  ####################                             
-    ##   ## ### ### ## ##  #######  ##### ### ### ##   ##                             
-    ## ### ###########  #  ####### ##  ########### ### ##                             
-    ## ### #####  ####  ## #### ## ##  ####  ##### ### ##                             
-    ###      ##    ##   #############   ##     #      ###                             
-    # ####   ##   ###  ##           ##  ##    ##   #### #                             
-  ## ####### #####    #             #    ####  ######  ##                            
-  ## #### ############################# ######### ###  ##                            
-  ## ##### ###    ####               ## ##    ## ####  ##                            
-  ## ###### ##    ####               ## ##    # #####   #                            
-  #  ##### ###    #########    #######  ##    ## ####   #                            
-  ## #########    ##   ####    #####    ##    #######  ##                            
-  ############    ##     ##    ##       ##    ###########                            
-    ###########    ##     ##    ##       ##    ####### ##                             
-    ##### ####    ##  #####    ## ###   ##    ### #####                              
-      #########    #####  ##    ##   #####     ##### ##                               
-      ### ####     ##    ##    ##     #      #### ###                                
-        ######     ##    ##    ##     #     #######                                  
-          #########################################                                   
-          ######## #### ##       #  # # #########                                    
-            ##### #### ####       #### #### # ###                                     
-              ##### ##   ##       #    # ## ###                                       
-                  ##########################                                                                                                                                                                                                              
+              #####                                             #####                            
+              ##    ####                                     ####    ##                           
+              ########  #################   #################  #####  #                           
+              ####   ### ###  ###  ### ####### ##   ###  ### ###  ## ##                           
+              #####  ###       ##   ###########   ##       ###  ## ###                           
+                #  ####          ###  ##### ###  ###          ####  ##                            
+                ####################  #########  ####################                             
+                ##   ## ### ### ## ##  #######  ##### ### ### ##   ##                             
+                ## ### ###########  #  ####### ##  ########### ### ##                             
+                ## ### #####  ####  ## #### ## ##  ####  ##### ### ##                             
+                ###      ##    ##   #############   ##     #      ###                             
+                # ####   ##   ###  ##           ##  ##    ##   #### #                             
+              ## ####### #####    #             #    ####  ######  ##                            
+              ## #### ############################# ######### ###  ##                            
+              ## ##### ###    ####               ## ##    ## ####  ##                            
+              ## ###### ##    ####               ## ##    # #####   #                            
+              #  ##### ###    #########    #######  ##    ## ####   #                            
+              ## #########    ##   ####    #####    ##    #######  ##                            
+              ############    ##     ##    ##       ##    ###########                            
+                ###########    ##     ##    ##       ##    ####### ##                             
+                ##### ####    ##  #####    ## ###   ##    ### #####                              
+                  #########    #####  ##    ##   #####     ##### ##                               
+                  ### ####     ##    ##    ##     #      #### ###                                
+                    ######     ##    ##    ##     #     #######                                  
+                      #########################################                                   
+                      ######## #### ##       #  # # #########                                    
+                        ##### #### ####       #### #### # ###                                     
+                          ##### ##   ##       #    # ## ###                                       
+                              ##########################                                                                                                                                                                                                              
 
    ██╗████████╗     ██╗██╗   ██╗ █████╗ ███╗   ██╗ █████╗ 
    ██║╚══██╔══╝     ██║██║   ██║██╔══██╗████╗  ██║██╔══██╗
@@ -49,128 +45,134 @@ const JAGUAR_ASCII = `
    ██║   ██║   ██   ██║██║   ██║██╔══██║██║╚██╗██║██╔══██║
    ██║   ██║   ╚█████╔╝╚██████╔╝██║  ██║██║ ╚████║██║  ██║
    ╚═╝   ╚═╝    ╚════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝
-
-\x1b[0m`;
+`;
 
 // ============================================================
-//  Palabras clave que disparan al jaguar
+//  Detección de palabras clave
 // ============================================================
-const JAGUAR_KEYWORDS = [
-  "itjuana",
-  "jaguars",
-  "itjaguars",
-  "i tjuana",
-  "i t juana",
-];
+const KEYWORDS = ["itjuana", "jaguars", "itjaguars", "i tjuana"];
 
-function containsJaguarKeyword(text) {
-  const lower = text.toLowerCase().replace(/[^a-z0-9 ]/g, "");
-  return JAGUAR_KEYWORDS.some((kw) => lower.includes(kw));
-}
-
-function printJaguar() {
-  process.stderr.write(JAGUAR_ASCII + "\n");
+function hasJaguarKeyword(text) {
+  const clean = text.toLowerCase().replace(/[^a-z0-9 ]/g, "");
+  return KEYWORDS.some((kw) => clean.includes(kw));
 }
 
 // ============================================================
-//  Servidor MCP
+//  Factory: crea un McpServer nuevo por sesión
 // ============================================================
-const server = new Server(
-  { name: "itjaguars-mcp", version: "1.0.0" },
-  { capabilities: { tools: {} } }
-);
+function buildServer() {
+  const server = new McpServer({
+    name: "itjaguars-mcp",
+    version: "1.0.0",
+  });
 
-// ── Listar herramientas disponibles ──────────────────────────
-server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [
-    {
-      name: "check_jaguars",
-      description:
-        "Detecta si el mensaje contiene referencias a iTJuana, Jaguars o iTJaguars y muestra el jaguar en consola.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          message: {
-            type: "string",
-            description: "El mensaje a analizar",
-          },
-        },
-        required: ["message"],
-      },
-    },
-    {
-      name: "roar",
-      description:
-        "Imprime el jaguar de iTJuana directamente en consola sin importar el mensaje.",
-      inputSchema: {
-        type: "object",
-        properties: {},
-        required: [],
-      },
-    },
-  ],
-}));
-
-// ── Ejecutar herramientas ────────────────────────────────────
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
-
-  if (name === "check_jaguars") {
-    const message = args?.message ?? "";
-    const detected = containsJaguarKeyword(message);
-
-    if (detected) {
-      printJaguar();
+  server.tool(
+    "check_jaguars",
+    "Detecta si el mensaje menciona iTJuana, Jaguars o iTJaguars e imprime el jaguar en la consola del usuario.",
+    { message: z.string().describe("El mensaje a analizar") },
+    async ({ message }) => {
+      if (hasJaguarKeyword(message)) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JAGUAR_ASCII,
+            },
+          ],
+        };
+      }
       return {
         content: [
           {
             type: "text",
-            text: "🐆 ¡JAGUARES DETECTADOS! El jaguar de iTJuana ha sido impreso en consola. ¡Arriba los Felinos!",
-          },
-        ],
-      };
-    } else {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `No se detectaron palabras clave de iTJuana/Jaguars en: "${message}". Prueba con 'iTJuana', 'Jaguars' o 'iTJaguars'.`,
+            text: `No se detectaron palabras clave en: "${message}". Prueba con 'iTJuana', 'Jaguars' o 'iTJaguars'.`,
           },
         ],
       };
     }
-  }
+  );
 
-  if (name === "roar") {
-    printJaguar();
-    return {
-      content: [
-        {
-          type: "text",
-          text: "🐆 ¡ROOAARRR! El jaguar ha rugido en consola.",
-        },
-      ],
+  server.tool(
+    "roar",
+    "Imprime el jaguar de iTJuana en la consola del usuario.",
+    {},
+    async () => {
+      return {
+        content: [{ type: "text", text: JAGUAR_ASCII }],
+      };
+    }
+  );
+
+  return server;
+}
+
+// ============================================================
+//  Express + Streamable HTTP transport
+// ============================================================
+const app = express();
+app.use(express.json());
+
+// Sesiones activas en memoria
+const transports = {};
+
+// Health check para Render
+app.get("/health", (_req, res) => {
+  res.json({ status: "ok", server: "itjaguars-mcp", sessions: Object.keys(transports).length });
+});
+
+// Endpoint principal MCP — POST
+app.post("/mcp", async (req, res) => {
+  const sessionId = req.headers["mcp-session-id"];
+  let transport;
+
+  if (sessionId && transports[sessionId]) {
+    transport = transports[sessionId];
+  } else if (!sessionId && isInitializeRequest(req.body)) {
+    transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+      onsessioninitialized: (id) => {
+        transports[id] = transport;
+      },
+    });
+    transport.onclose = () => {
+      if (transport.sessionId) delete transports[transport.sessionId];
     };
+    const server = buildServer();
+    await server.connect(transport);
+  } else {
+    res.status(400).json({
+      jsonrpc: "2.0",
+      error: { code: -32000, message: "Bad Request: sesión inválida o faltante" },
+      id: null,
+    });
+    return;
   }
 
-  return {
-    content: [{ type: "text", text: `Herramienta desconocida: ${name}` }],
-    isError: true,
-  };
+  await transport.handleRequest(req, res, req.body);
+});
+
+// Endpoint MCP — GET (notificaciones servidor → cliente)
+app.get("/mcp", async (req, res) => {
+  const sessionId = req.headers["mcp-session-id"];
+  const transport = sessionId && transports[sessionId];
+  if (!transport) { res.status(400).json({ error: "Sesión no encontrada" }); return; }
+  await transport.handleRequest(req, res);
+});
+
+// Endpoint MCP — DELETE (terminar sesión)
+app.delete("/mcp", async (req, res) => {
+  const sessionId = req.headers["mcp-session-id"];
+  const transport = sessionId && transports[sessionId];
+  if (!transport) { res.status(400).json({ error: "Sesión no encontrada" }); return; }
+  await transport.handleRequest(req, res);
 });
 
 // ============================================================
-//  Arrancar el servidor
+//  Iniciar servidor
 // ============================================================
-async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  process.stderr.write(
-    "🐆 iTJaguars MCP Server corriendo. Esperando mensajes...\n"
-  );
-}
-
-main().catch((err) => {
-  process.stderr.write(`Error fatal: ${err.message}\n`);
-  process.exit(1);
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🐆 iTJaguars MCP Server escuchando en el puerto ${PORT}`);
+  console.log(`   Endpoint MCP:  POST/GET/DELETE /mcp`);
+  console.log(`   Health check:  GET /health`);
 });
